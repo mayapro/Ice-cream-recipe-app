@@ -49,8 +49,17 @@ schema.sql            — paste into Supabase's SQL editor once
 - Photos live in Supabase Storage under `photos/<your-user-id>/<random-name>.jpg`. Only you can upload/delete into your own folder (enforced by storage policies in `schema.sql`); the bucket is public-read, so the returned URLs work directly in `<img>` tags without extra signing. Paths are random and unguessable, but if you want them fully private later, flip the bucket to private and switch `getPublicUrl` to `createSignedUrl` in `js/data.js`.
 - Realtime sync: `js/data.js` subscribes to Postgres changes on your rows, so edits on one device show up on another without a refresh.
 
+## Offline support
+
+The app is local-first: every recipe is mirrored into the browser's IndexedDB (`js/idb.js`), and every change you make — add, edit, delete, batch notes — writes to that local copy immediately and queues in an "outbox." When you're back online, the outbox replays against Supabase in the order things happened (`syncOutbox` in `js/data.js`), then everything reconciles via a fresh fetch and realtime subscription.
+
+What this means in practice:
+- You can view, add, and edit recipes with zero connection. A banner at the top says so, and shows how many changes are waiting to sync once you're back.
+- **Photos are the one exception** — uploading a new photo still needs a live connection (Supabase Storage has no offline queue here), so the "+" button just asks you to wait until you're online.
+- If you edit the *same* recipe on two devices while both are offline, the sync engine doesn't merge — whichever change syncs second silently overwrites the first (last-write-wins). Fine for how one person uses this day to day; worth knowing if that ever happens.
+
 ## What's not built yet (ideas for later)
 
-- Offline write queue — right now the service worker only caches the app shell, not your data. If you're offline, viewing works if it was already loaded, but adding/editing needs a connection.
+- Offline photo queueing (store the blob locally, upload once back online).
 - Numbered-step instructions instead of one paragraph (small frontend-only change, discussed separately).
 - Per-step photos/timers (would need a schema change — a proper JSON/array column instead of plain text).

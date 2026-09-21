@@ -2,6 +2,7 @@ import { getSession, onAuthChange, sendMagicLink, signOut } from './auth.js';
 import {
   subscribeToRecipes, saveRecipe, deleteRecipe,
   addBatchEntry, removeBatchEntry, uploadPhoto,
+  getPendingSyncCount, syncOutbox,
 } from './data.js';
 
 const CATEGORIES = ["Custard base", "Philadelphia base", "Sorbet", "Gelato", "Vegan / dairy-free", "Mix-in / swirl", "Other"];
@@ -17,6 +18,8 @@ let state = {
   currentId: null,
   form: null,
   pendingPhotos: [],
+  isOnline: navigator.onLine,
+  pendingSyncCount: 0,
 };
 
 function el(html) {
@@ -63,6 +66,31 @@ async function boot() {
   });
   if (session) startDataSync();
   render();
+
+  window.addEventListener('online', async () => {
+    state.isOnline = true;
+    if (session) await syncOutbox(session.user.id);
+    await refreshPendingCount();
+  });
+  window.addEventListener('offline', () => {
+    state.isOnline = false;
+    renderIfSafe();
+  });
+  refreshPendingCount();
+  setInterval(refreshPendingCount, 15000);
+}
+
+// Background events (sync ticks, connectivity changes) should never blow
+// away an in-progress add/edit form by re-rendering over it mid-keystroke.
+function renderIfSafe() {
+  if (state.view !== 'form') render();
+}
+
+async function refreshPendingCount() {
+  try {
+    state.pendingSyncCount = await getPendingSyncCount();
+  } catch (e) { /* ignore */ }
+  renderIfSafe();
 }
 
 function startDataSync() {
@@ -106,9 +134,21 @@ function render() {
   const app = document.getElementById('app');
   app.innerHTML = '';
   if (!session) { app.appendChild(renderLogin()); return; }
+  const banner = renderStatusBanner();
+  if (banner) app.appendChild(banner);
   if (state.view === 'list') app.appendChild(renderList());
   else if (state.view === 'detail') app.appendChild(renderDetail());
   else if (state.view === 'form') app.appendChild(renderForm());
+}
+
+function renderStatusBanner() {
+  if (!state.isOnline) {
+    return el(`<div class="banner">You're offline. Changes you make now will save on this device and sync automatically once you're back online.</div>`);
+  }
+  if (state.pendingSyncCount > 0) {
+    return el(`<div class="banner">Syncing ${state.pendingSyncCount} change${state.pendingSyncCount === 1 ? '' : 's'} made while offline…</div>`);
+  }
+  return null;
 }
 
 // ---------------- Login ----------------
@@ -261,13 +301,12 @@ function renderDetail() {
   const batches = r.batches || [];
   if (batches.length) {
     const list = el(`<div></div>`);
-    [...batches].reverse().forEach((b, ri) => {
-      const idx = batches.length - 1 - ri;
+    [...batches].reverse().forEach((b) => {
       list.appendChild(el(`
         <div class="batch-entry">
           <div class="batch-top">
             <div class="batch-date">${fmtDate(b.date)} ${b.rating ? starsHTML(b.rating) : ''}</div>
-            <button class="del-batch" data-idx="${idx}">remove</button>
+            <button class="del-batch" data-date="${escapeAttr(b.date)}">remove</button>
           </div>
           ${b.note ? `<div class="batch-note">${escapeHTML(b.note)}</div>` : ''}
         </div>
@@ -293,7 +332,8 @@ function renderDetail() {
   wrap.querySelector('#back-btn').addEventListener('click', goList);
   wrap.querySelector('#edit-btn').addEventListener('click', () => goEditForm(r.id));
   wrap.querySelectorAll('.del-batch').forEach(b => b.addEventListener('click', async () => {
-    await removeBatchEntry(session.user.id, r, parseInt(b.dataset.idx));
+    await removeBatchEntry(session.user.id, r.id, b.dataset.date);
+    refreshPendingCount();
   }));
 
   const starPicker = wrap.querySelector('#batch-stars');
@@ -306,8 +346,9 @@ function renderDetail() {
     const note = wrap.querySelector('#batch-note').value.trim();
     if (!note && !draftRating) { toast('Add a note or a rating first'); return; }
     try {
-      await addBatchEntry(session.user.id, r, { date: new Date().toISOString(), note, rating: draftRating });
-      toast('Batch logged');
+      await addBatchEntry(session.user.id, r.id, { date: new Date().toISOString(), note, rating: draftRating });
+      toast(state.isOnline ? 'Batch logged' : 'Batch logged — will sync once online');
+      refreshPendingCount();
     } catch (e) { console.error(e); toast("Couldn't save that — try again."); }
   });
 
@@ -366,7 +407,10 @@ function renderForm() {
       photoGrid.appendChild(w);
     });
     const addBtn = el(`<button type="button" class="photo-add">+</button>`);
-    addBtn.addEventListener('click', () => fileInput.click());
+    addBtn.addEventListener('click', () => {
+      if (!navigator.onLine) { toast("Photos need an internet connection — add this one once you're back online."); return; }
+      fileInput.click();
+    });
     photoGrid.appendChild(addBtn);
   }
   const fileInput = el(`<input type="file" accept="image/*" multiple style="display:none">`);
@@ -406,6 +450,7 @@ function renderForm() {
     delBtn.addEventListener('click', async () => {
       if (confirm("Delete this recipe and its batch notes? This can't be undone.")) {
         await deleteRecipe(session.user.id, f.id);
+        refreshPendingCount();
         goList();
       }
     });
@@ -430,7 +475,8 @@ function renderForm() {
     };
     try {
       const id = await saveRecipe(session.user.id, data, f.id || null);
-      toast(isEdit ? 'Recipe updated' : 'Recipe added');
+      toast(state.isOnline ? (isEdit ? 'Recipe updated' : 'Recipe added') : 'Saved on this device — will sync once online');
+      refreshPendingCount();
       goDetail(id);
     } catch (err) {
       console.error(err);

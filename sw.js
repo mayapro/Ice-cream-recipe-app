@@ -1,5 +1,5 @@
 // Bumping this string forces browsers to fetch fresh files on next load.
-const CACHE_NAME = 'scoop-journal-v1';
+const CACHE_NAME = 'scoop-journal-v2';
 
 const APP_SHELL = [
   './',
@@ -8,6 +8,7 @@ const APP_SHELL = [
   './js/app.js',
   './js/auth.js',
   './js/data.js',
+  './js/idb.js',
   './js/supabase-client.js',
   './manifest.json',
   './icons/icon-192.png',
