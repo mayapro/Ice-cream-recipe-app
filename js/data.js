@@ -230,6 +230,35 @@ export async function uploadPhoto(userId, blob) {
   return { path, url: data.publicUrl };
 }
 
+// Asks the import-recipe Netlify Function to read a recipe from a web page.
+// Needs a live connection and a logged-in session (the function checks both).
+export async function importRecipeFromUrl(url) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Please log in again.');
+
+  let res;
+  try {
+    res = await fetch('/.netlify/functions/import-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ url }),
+    });
+  } catch (e) {
+    throw new Error("Couldn't reach the import service. Check your connection.");
+  }
+
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* not JSON */ }
+
+  if (res.status === 404 && !body) {
+    throw new Error('Import only works on the deployed site, or locally when running "netlify dev".');
+  }
+  if (!res.ok || !body || !body.ok) {
+    throw new Error((body && body.message) || 'Import failed. Try again.');
+  }
+  return body.recipe;
+}
+
 // ==================== Sync engine ====================
 // Replays queued offline changes against the server, in the order they
 // happened. Stops at the first failure so nothing gets applied out of

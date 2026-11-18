@@ -39,6 +39,7 @@ js/supabase-client.js — fill in your Supabase URL + anon key here
 js/auth.js            — magic-link sign in / sign out
 js/data.js            — recipe CRUD, photo upload, realtime sync
 js/app.js             — UI: rendering, view state, event handling
+netlify/functions/import-recipe.js — server-side recipe importer (Netlify Function)
 icons/                — app icons (swap these for your own artwork anytime)
 schema.sql            — paste into Supabase's SQL editor once
 ```
@@ -48,6 +49,22 @@ schema.sql            — paste into Supabase's SQL editor once
 - Each recipe is one row in `recipes`. Batch notes (your dated "how did it turn out" log) live as a JSON array in the `batches` column on that same row — no separate table.
 - Photos live in Supabase Storage under `photos/<your-user-id>/<random-name>.jpg`. Only you can upload/delete into your own folder (enforced by storage policies in `schema.sql`); the bucket is public-read, so the returned URLs work directly in `<img>` tags without extra signing. Paths are random and unguessable, but if you want them fully private later, flip the bucket to private and switch `getPublicUrl` to `createSignedUrl` in `js/data.js`.
 - Realtime sync: `js/data.js` subscribes to Postgres changes on your rows, so edits on one device show up on another without a refresh.
+
+## Import a recipe from a link
+
+On the **New recipe** form, paste a recipe URL into "Import from a link" and tap Import — the title, makes, ingredients and method fill in below, and Source is set to the link. Nothing is saved until you press "Add recipe", so you can fix anything first.
+
+How it works: browsers can't fetch other websites directly (CORS), so the form calls a Netlify Function (`netlify/functions/import-recipe.js`). It fetches the page, finds the schema.org `Recipe` data most recipe sites embed for Google, and returns clean fields. No AI, no dependencies. It checks that the caller is logged in (so strangers can't use it as a proxy) and refuses private/internal addresses.
+
+**One-time setup on Netlify:** Site configuration → Environment variables → add
+- `SUPABASE_URL` — your project URL, e.g. `https://abcdefghijk.supabase.co`
+- `SUPABASE_ANON_KEY` — the same anon key the app uses
+
+then trigger a redeploy (env vars only apply to new deploys).
+
+**Testing locally:** Live Server can't run functions. Use `npx netlify-cli dev` from the project folder instead (serves the site plus functions at http://localhost:8888, and reads env vars from a `.env` file or your linked Netlify site). Or just test on the deployed site.
+
+Limits: sites that don't publish structured recipe data, paywalled sites, and sites that block automated requests will show a message instead of importing. Importing needs a connection.
 
 ## Offline support
 
@@ -60,6 +77,7 @@ What this means in practice:
 
 ## What's not built yet (ideas for later)
 
+- Importing from sites without structured recipe data (would need an AI fallback).
 - Offline photo queueing (store the blob locally, upload once back online).
 - Numbered-step instructions instead of one paragraph (small frontend-only change, discussed separately).
 - Per-step photos/timers (would need a schema change — a proper JSON/array column instead of plain text).

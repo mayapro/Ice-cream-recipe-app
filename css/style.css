@@ -197,3 +197,15 @@ input, textarea, select {
 .banner { background: var(--line-soft); border-radius: 12px; padding: 14px 16px; font-size: 0.85rem; color: var(--ink-soft); margin: 20px 0; }
 
 @media (max-width: 480px) { .two-col { grid-template-columns: 1fr; } }
+
+/* ---------- Import from link ---------- */
+.import-box { border: 1px dashed var(--line); border-radius: 12px; padding: 14px; margin-bottom: 22px; }
+.import-box label { display: block; font-size: 0.78rem; color: var(--ink-soft); font-weight: 600; margin-bottom: 8px; }
+.import-box .optional { font-weight: 400; }
+.import-row { display: flex; gap: 8px; }
+.import-row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; outline: none; }
+.import-row input:focus { border-color: var(--berry); }
+.import-row button { border: none; background: var(--ink); color: var(--cream); padding: 0 18px; border-radius: 10px; font-size: 0.9rem; font-weight: 500; white-space: nowrap; }
+.import-row button:disabled { opacity: 0.5; }
+.import-box .field-hint { margin-top: 8px; }
+.import-box .field-hint.error { color: var(--danger); }

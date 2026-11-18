@@ -1,5 +1,5 @@
 // Bumping this string forces browsers to fetch fresh files on next load.
-const CACHE_NAME = 'scoop-journal-v2';
+const CACHE_NAME = 'scoop-journal-v3';
 
 const APP_SHELL = [
   './',

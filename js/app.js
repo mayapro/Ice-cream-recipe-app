@@ -2,7 +2,7 @@ import { getSession, onAuthChange, sendMagicLink, signOut } from './auth.js';
 import {
   subscribeToRecipes, saveRecipe, deleteRecipe,
   addBatchEntry, removeBatchEntry, uploadPhoto,
-  getPendingSyncCount, syncOutbox,
+  getPendingSyncCount, syncOutbox, importRecipeFromUrl,
 } from './data.js';
 
 const CATEGORIES = ["Custard base", "Philadelphia base", "Sorbet", "Gelato", "Vegan / dairy-free", "Mix-in / swirl", "Other"];
@@ -364,6 +364,68 @@ function renderForm() {
   wrap.appendChild(el(`<h2 style="font-size:1.4rem;margin:8px 0 22px">${isEdit ? 'Edit recipe' : 'New recipe'}</h2>`));
 
   const form = el(`<form id="recipe-form"></form>`);
+
+  // Import from a link — only when creating, so it can never overwrite a recipe you've already tweaked.
+  if (!isEdit) {
+    const box = el(`
+      <div class="import-box">
+        <label for="import-url">Import from a link <span class="optional">(optional)</span></label>
+        <div class="import-row">
+          <input id="import-url" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com/vanilla-ice-cream">
+          <button type="button" id="import-btn">Import</button>
+        </div>
+        <div class="field-hint" id="import-hint"></div>
+      </div>
+    `);
+    const importInput = box.querySelector('#import-url');
+    const importBtn = box.querySelector('#import-btn');
+    const importHint = box.querySelector('#import-hint');
+    const defaultHint = 'Pulls in the title, ingredients and method. You can edit everything before saving.';
+    const setHint = (text, isError) => {
+      importHint.textContent = text;
+      importHint.classList.toggle('error', !!isError);
+    };
+    setHint(navigator.onLine ? defaultHint : 'Importing needs an internet connection.');
+    importBtn.disabled = !navigator.onLine;
+
+    const runImport = async () => {
+      const url = importInput.value.trim();
+      if (!url) { setHint('Paste a link first.', true); return; }
+      if (!navigator.onLine) { setHint('Importing needs an internet connection.', true); return; }
+
+      const fieldIds = ['#f-title', '#f-ingredients', '#f-instructions'];
+      const hasTypedText = fieldIds.some((sel) => form.querySelector(sel).value.trim());
+      if (hasTypedText && !confirm("Replace what you've typed so far with the imported recipe?")) return;
+
+      importBtn.disabled = true;
+      importBtn.textContent = 'Importing…';
+      setHint('Reading the recipe…');
+      try {
+        const recipe = await importRecipeFromUrl(url);
+        form.querySelector('#f-title').value = recipe.title || '';
+        form.querySelector('#f-servings').value = recipe.servings || '';
+        form.querySelector('#f-source').value = recipe.source || url;
+        form.querySelector('#f-ingredients').value = recipe.ingredients || '';
+        form.querySelector('#f-instructions').value = recipe.instructions || '';
+        let host = url;
+        try { host = new URL(recipe.source || url).hostname.replace(/^www\./, ''); } catch (e) { /* keep url */ }
+        setHint(`Imported from ${host}. Check it over and adjust before saving.`);
+        toast('Imported. Review and adjust before saving.');
+        form.querySelector('#f-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (err) {
+        setHint(err.message, true);
+      } finally {
+        importBtn.disabled = !navigator.onLine;
+        importBtn.textContent = 'Import';
+      }
+    };
+    importBtn.addEventListener('click', runImport);
+    importInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); runImport(); }
+    });
+    form.appendChild(box);
+  }
+
   form.appendChild(el(`<div class="field"><label>Title</label><input id="f-title" required value="${escapeAttr(f.title)}" placeholder="Brown butter pecan"></div>`));
 
   const twoCol = el(`<div class="two-col"></div>`);
