@@ -4,6 +4,7 @@ import {
   addBatchEntry, removeBatchEntry, uploadPhoto,
   getPendingSyncCount, syncOutbox, importRecipeFromUrl,
 } from './data.js';
+import { extractRecipeFromJsonLd, buildBookmarkletHref, decodeImportPayload } from './recipe-extract.js';
 
 const CATEGORIES = ["Custard base", "Philadelphia base", "Sorbet", "Gelato", "Vegan / dairy-free", "Mix-in / swirl", "Other"];
 
@@ -54,6 +55,62 @@ function escapeHTML(str) {
 const escapeAttr = escapeHTML;
 
 // ---------------- Boot ----------------
+// ---------------- Bookmarklet hand-off ----------------
+// The bookmark opens this app with "#import=<data>". We read it once, clear it
+// from the address bar, and hold the result until the user is logged in.
+const PENDING_IMPORT_KEY = 'scoop-pending-import';
+const PENDING_IMPORT_MAX_AGE_MS = 30 * 60 * 1000;
+let pendingImportMemory = null;
+
+function readPendingImport() {
+  let p = pendingImportMemory;
+  if (!p) {
+    try { p = JSON.parse(localStorage.getItem(PENDING_IMPORT_KEY) || 'null'); } catch (e) { p = null; }
+  }
+  if (!p || Date.now() - p.ts > PENDING_IMPORT_MAX_AGE_MS) { clearPendingImport(); return null; }
+  return p;
+}
+
+function clearPendingImport() {
+  pendingImportMemory = null;
+  try { localStorage.removeItem(PENDING_IMPORT_KEY); } catch (e) { /* ignore */ }
+}
+
+function captureImportFromHash() {
+  const m = location.hash.match(/^#import=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  let pending;
+  try {
+    const { url, blocks } = decodeImportPayload(m[1]);
+    const recipe = extractRecipeFromJsonLd(blocks);
+    pending = recipe
+      ? { ts: Date.now(), url, recipe }
+      : { ts: Date.now(), url, error: "Couldn't find a readable recipe on that page." };
+  } catch (e) {
+    pending = { ts: Date.now(), error: 'That import was damaged. Try the bookmark again.' };
+  }
+  pendingImportMemory = pending;
+  try { localStorage.setItem(PENDING_IMPORT_KEY, JSON.stringify(pending)); } catch (e) { /* memory copy still works */ }
+}
+
+function applyPendingImport() {
+  const p = readPendingImport();
+  if (!p) return;
+  clearPendingImport();
+  if (p.error || !p.recipe) { toast(p.error || 'Import failed.'); return; }
+  openNewForm({
+    title: p.recipe.title || '',
+    servings: p.recipe.servings || '',
+    source: p.url || '',
+    ingredients: p.recipe.ingredients || '',
+    instructions: p.recipe.instructions || '',
+  });
+  let host = '';
+  try { host = new URL(p.url).hostname.replace(/^www\./, ''); } catch (e) { /* no host */ }
+  toast(host ? `Imported from ${host}. Review and adjust before saving.` : 'Imported. Review and adjust before saving.');
+}
+
 async function boot() {
   session = await getSession();
   onAuthChange((newSession) => {
@@ -62,10 +119,12 @@ async function boot() {
     if (!!session !== wasLoggedIn) {
       if (session) startDataSync(); else stopDataSync();
       render();
+      if (session) applyPendingImport();
     }
   });
   if (session) startDataSync();
   render();
+  if (session) applyPendingImport();
 
   window.addEventListener('online', async () => {
     state.isOnline = true;
@@ -109,12 +168,14 @@ function stopDataSync() {
 // ---------------- Navigation ----------------
 function goList() { state.view = 'list'; state.currentId = null; render(); }
 function goDetail(id) { state.view = 'detail'; state.currentId = id; render(); window.scrollTo(0, 0); }
-function goNewForm() {
+function openNewForm(prefill) {
   state.view = 'form';
-  state.form = { title: '', category: CATEGORIES[0], source: '', servings: '', ingredients: '', instructions: '', tweaks: '', tags: '', rating: 0, photo_paths: [] };
+  state.form = { title: '', category: CATEGORIES[0], source: '', servings: '', ingredients: '', instructions: '', tweaks: '', tags: '', rating: 0, photo_paths: [], ...prefill };
   state.pendingPhotos = [];
   render(); window.scrollTo(0, 0);
 }
+// Kept argument-free on purpose: it's used directly as a click handler.
+function goNewForm() { openNewForm({}); }
 function goEditForm(id) {
   const r = recipes.find(x => x.id === id);
   if (!r) return;
@@ -165,6 +226,9 @@ function renderLogin() {
       <div class="login-note" id="login-note">We'll email you a one-time link — no password to remember.</div>
     </div>
   `);
+  if (readPendingImport()) {
+    wrap.querySelector('.sub').textContent = 'Log in to finish importing your recipe.';
+  }
   wrap.querySelector('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = wrap.querySelector('#login-email').value.trim();
@@ -375,6 +439,17 @@ function renderForm() {
           <button type="button" id="import-btn">Import</button>
         </div>
         <div class="field-hint" id="import-hint"></div>
+        <button type="button" class="link-btn" id="bm-toggle">Site blocked the import? Use the bookmarklet</button>
+        <div class="bm-panel" id="bm-panel" hidden>
+          <p>Sends the recipe page you're viewing into this form. Set it up once:</p>
+          <ol>
+            <li><button type="button" class="mini-btn" id="bm-copy">Copy bookmarklet code</button></li>
+            <li>Create a new bookmark in your browser, name it "Send to Scoop Journal", and paste the code as its address.</li>
+            <li>On any recipe page, click that bookmark.</li>
+          </ol>
+          <p class="field-hint">Shortcut on a laptop: drag <a class="bm-link" id="bm-link" href="#">Send to Scoop Journal</a> to your bookmarks bar instead.</p>
+          <p class="field-hint" id="bm-local" hidden>You're on localhost, so this bookmark would point back to localhost. Open your deployed site to get the real one.</p>
+        </div>
       </div>
     `);
     const importInput = box.querySelector('#import-url');
@@ -423,6 +498,26 @@ function renderForm() {
     importInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); runImport(); }
     });
+    const bmHref = buildBookmarkletHref(location.origin);
+    const bmLink = box.querySelector('#bm-link');
+    bmLink.setAttribute('href', bmHref);
+    bmLink.addEventListener('click', (e) => {
+      e.preventDefault(); // clicking it here would run it on this page; it's meant to be dragged
+      toast("Drag this to your bookmarks bar. Don't click it here.");
+    });
+    box.querySelector('#bm-toggle').addEventListener('click', () => {
+      const panel = box.querySelector('#bm-panel');
+      panel.hidden = !panel.hidden;
+    });
+    box.querySelector('#bm-copy').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(bmHref);
+        toast('Bookmarklet code copied.');
+      } catch (e) {
+        toast("Couldn't copy. Try dragging the button on a laptop instead.");
+      }
+    });
+    if (['localhost', '127.0.0.1'].includes(location.hostname)) box.querySelector('#bm-local').hidden = false;
     form.appendChild(box);
   }
 
@@ -579,4 +674,5 @@ document.addEventListener('click', (e) => {
   if (e.target && e.target.id === 'logout-btn') signOut();
 });
 
+captureImportFromHash();
 boot();

@@ -40,6 +40,7 @@ js/auth.js            — magic-link sign in / sign out
 js/data.js            — recipe CRUD, photo upload, realtime sync
 js/app.js             — UI: rendering, view state, event handling
 netlify/functions/import-recipe.js — server-side recipe importer (Netlify Function)
+js/recipe-extract.js  — in-browser recipe reader + bookmarklet builder (used by the bookmarklet import)
 icons/                — app icons (swap these for your own artwork anytime)
 schema.sql            — paste into Supabase's SQL editor once
 ```
@@ -65,6 +66,16 @@ then trigger a redeploy (env vars only apply to new deploys).
 **Testing locally:** Live Server can't run functions. Use `npx netlify-cli dev` from the project folder instead (serves the site plus functions at http://localhost:8888, and reads env vars from a `.env` file or your linked Netlify site). Or just test on the deployed site.
 
 Limits: sites that don't publish structured recipe data, paywalled sites, and sites that block automated requests will show a message instead of importing. Importing needs a connection.
+
+### Bookmarklet import (for sites that block link imports)
+
+Some sites refuse requests from servers (bot protection, paywalls). For those, use the bookmarklet. Set it up once: in the New recipe form, open "Site blocked the import? Use the bookmarklet", click "Copy bookmarklet code", then create a new bookmark in your browser and paste the code as its address (on a laptop you can instead drag the "Send to Scoop Journal" button to your bookmarks bar). After that, click the bookmark while viewing any recipe page. It sends that page's embedded recipe data to the app (in the URL hash, which is never sent to a server) and opens a prefilled New recipe form. Because it runs in your own browser, it sees what you see, including pages behind a login you already have.
+
+Details worth knowing:
+- Copy the code from the **deployed** site. The bookmark has the site's address baked in, so one made on localhost points back to localhost.
+- Reading happens in the app (`js/recipe-extract.js`), not in the bookmark, so improvements don't need a reinstall. That file mirrors the extraction in `import-recipe.js`; keep the two in sync.
+- If you're logged out when the recipe arrives, it's held for 30 minutes and opens once you log in.
+- A few sites block bookmarklets with strict security settings, and pages with no embedded recipe data won't work either way.
 
 ## Offline support
 

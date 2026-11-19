@@ -209,3 +209,12 @@ input, textarea, select {
 .import-row button:disabled { opacity: 0.5; }
 .import-box .field-hint { margin-top: 8px; }
 .import-box .field-hint.error { color: var(--danger); }
+
+/* ---------- Bookmarklet panel ---------- */
+.link-btn { display: block; margin-top: 10px; padding: 0; border: none; background: none; color: var(--ink-soft); font-size: 0.8rem; text-decoration: underline; text-underline-offset: 2px; text-align: left; }
+.link-btn.inline { display: inline; margin: 0; font-size: inherit; }
+.bm-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: 0.85rem; color: var(--ink-soft); line-height: 1.6; }
+.bm-panel p { margin: 0 0 10px; }
+.bm-panel ol { margin: 0 0 10px; padding-left: 20px; }
+.bm-panel li { margin-bottom: 6px; }
+.bm-link { display: inline-block; background: var(--ink); color: var(--cream); padding: 5px 12px; border-radius: 100px; font-size: 0.82rem; font-weight: 500; text-decoration: none; cursor: grab; }
