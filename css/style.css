@@ -145,6 +145,7 @@ input, textarea, select {
 .detail-row-actions { display: flex; gap: 8px; }
 .detail-stars { margin-top: 10px; }
 .detail-source { color: var(--ink-soft); font-size: 0.85rem; margin-top: 6px; font-style: italic; }
+.detail-source a { color: var(--berry); text-decoration: underline; text-underline-offset: 2px; }
 
 .section { padding: 22px 0; border-top: 1px solid var(--line-soft); }
 .section h3 { font-size: 0.78rem; color: var(--ink-soft); font-family: 'IBM Plex Sans'; font-weight: 600; margin-bottom: 12px; }

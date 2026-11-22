@@ -330,6 +330,23 @@ function preserveFocus(id) {
   if (node) { node.focus(); const v = node.value; node.value = ''; node.value = v; }
 }
 
+// The source field is free text ("Salt & Straw cookbook") or a web address.
+// Only a whole-field http(s) address becomes a link; anything else stays plain text.
+function sourceHTML(source) {
+  const text = String(source).trim();
+  const candidate = /^www\./i.test(text) ? 'https://' + text : text;
+  if (/^https?:\/\/\S+$/i.test(candidate)) {
+    try {
+      const u = new URL(candidate);
+      if (u.protocol === 'http:' || u.protocol === 'https:') {
+        const label = u.hostname.replace(/^www\./, '');
+        return `<a href="${escapeAttr(u.href)}" target="_blank" rel="noopener noreferrer" title="${escapeAttr(u.href)}">${escapeHTML(label)}</a>`;
+      }
+    } catch (e) { /* not a valid address: show as text */ }
+  }
+  return escapeHTML(text);
+}
+
 // ---------------- Detail ----------------
 function renderDetail() {
   const r = recipes.find(x => x.id === state.currentId);
@@ -343,7 +360,7 @@ function renderDetail() {
       <div>
         <div class="detail-title display">${escapeHTML(r.title || 'Untitled')}</div>
         <div class="detail-cat">${escapeHTML(r.category || '')}</div>
-        ${r.source ? `<div class="detail-source">from ${escapeHTML(r.source)}</div>` : ''}
+        ${r.source ? `<div class="detail-source">from ${sourceHTML(r.source)}</div>` : ''}
         <div class="detail-stars">${starsHTML(r.rating)}</div>
       </div>
       <div class="detail-row-actions"><button class="icon-btn" id="edit-btn" title="Edit">✎</button></div>
