@@ -149,6 +149,18 @@ input, textarea, select {
 .section { padding: 22px 0; border-top: 1px solid var(--line-soft); }
 .section h3 { font-size: 0.78rem; color: var(--ink-soft); font-family: 'IBM Plex Sans'; font-weight: 600; margin-bottom: 12px; }
 .prose { white-space: pre-wrap; line-height: 1.7; }
+/* Numbered, checkable method steps */
+.steps { display: flex; flex-direction: column; gap: 8px; }
+.step-heading { font-weight: 600; margin: 14px 0 2px; font-size: 0.95rem; }
+.step-heading:first-child { margin-top: 0; }
+.step { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 12px; padding: 12px 14px; font: inherit; line-height: 1.6; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.step-num { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; background: var(--line-soft); color: var(--ink-soft); display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; }
+.step.done { background: transparent; border-color: var(--line-soft); }
+.step.done .step-text { text-decoration: line-through; color: var(--ink-soft); }
+.step.done .step-num { background: var(--pistachio); color: #fff; }
+.steps-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 0.85rem; color: var(--ink-soft); }
+.steps-foot .link-btn[hidden] { display: none; }
+
 .servings-line { font-size: 0.85rem; color: var(--ink-soft); margin-top: -4px; margin-bottom: 14px; }
 
 .batch-entry { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }

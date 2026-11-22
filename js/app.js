@@ -4,6 +4,7 @@ import {
   addBatchEntry, removeBatchEntry, uploadPhoto,
   getPendingSyncCount, syncOutbox, importRecipeFromUrl,
 } from './data.js';
+import { parseSteps, getCheckedSteps, setStepChecked, clearStepChecks } from './steps.js';
 import { extractRecipeFromJsonLd, buildBookmarkletHref, decodeImportPayload } from './recipe-extract.js';
 
 const CATEGORIES = ["Custard base", "Philadelphia base", "Sorbet", "Gelato", "Vegan / dairy-free", "Mix-in / swirl", "Other"];
@@ -358,7 +359,7 @@ function renderDetail() {
 
   if (r.servings) wrap.appendChild(el(`<div class="servings-line">Makes about ${escapeHTML(r.servings)}</div>`));
   if (r.ingredients) { const s = el(`<div class="section"><h3>Ingredients</h3></div>`); s.appendChild(el(`<div class="prose">${escapeHTML(r.ingredients)}</div>`)); wrap.appendChild(s); }
-  if (r.instructions) { const s = el(`<div class="section"><h3>Method</h3></div>`); s.appendChild(el(`<div class="prose">${escapeHTML(r.instructions)}</div>`)); wrap.appendChild(s); }
+  if (r.instructions) wrap.appendChild(renderMethod(r));
   if (r.tweaks) { const s = el(`<div class="section"><h3>My tweaks</h3></div>`); s.appendChild(el(`<div class="prose">${escapeHTML(r.tweaks)}</div>`)); wrap.appendChild(s); }
 
   const logSec = el(`<div class="section"><h3>Batch notes</h3></div>`);
@@ -417,6 +418,59 @@ function renderDetail() {
   });
 
   return wrap;
+}
+
+// Numbered, checkable method. Taps update the DOM in place (no render()),
+// so a background sync can't wipe what you've ticked mid-recipe.
+function renderMethod(r) {
+  const section = el(`<div class="section"><h3>Method</h3></div>`);
+  const items = parseSteps(r.instructions);
+  const stepTexts = items.filter((it) => it.type === 'step').map((it) => it.text);
+  if (!stepTexts.length) { section.appendChild(el(`<div class="prose">${escapeHTML(r.instructions)}</div>`)); return section; }
+
+  const checked = getCheckedSteps(r.id, stepTexts);
+  const list = el(`<div class="steps"></div>`);
+  let n = 0;
+  items.forEach((it) => {
+    if (it.type === 'heading') { list.appendChild(el(`<div class="step-heading">${escapeHTML(it.text)}</div>`)); return; }
+    const done = checked.has(n);
+    list.appendChild(el(`
+      <button type="button" class="step ${done ? 'done' : ''}" data-n="${n}" aria-pressed="${done}">
+        <span class="step-num">${n + 1}</span>
+        <span class="step-text">${escapeHTML(it.text)}</span>
+      </button>
+    `));
+    n++;
+  });
+  section.appendChild(list);
+
+  const foot = el(`<div class="steps-foot"><span class="steps-count"></span><button type="button" class="link-btn steps-reset">Reset checks</button></div>`);
+  const count = foot.querySelector('.steps-count');
+  const resetBtn = foot.querySelector('.steps-reset');
+  const updateFoot = () => {
+    const done = list.querySelectorAll('.step.done').length;
+    count.textContent = `${done} of ${stepTexts.length} done`;
+    resetBtn.hidden = done === 0;
+  };
+  updateFoot();
+  section.appendChild(foot);
+
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('.step');
+    if (!btn) return;
+    const i = parseInt(btn.dataset.n, 10);
+    const nowDone = !btn.classList.contains('done');
+    btn.classList.toggle('done', nowDone);
+    btn.setAttribute('aria-pressed', String(nowDone));
+    setStepChecked(r.id, i, stepTexts[i], nowDone);
+    updateFoot();
+  });
+  resetBtn.addEventListener('click', () => {
+    clearStepChecks(r.id);
+    list.querySelectorAll('.step').forEach((b) => { b.classList.remove('done'); b.setAttribute('aria-pressed', 'false'); });
+    updateFoot();
+  });
+  return section;
 }
 
 // ---------------- Form ----------------
@@ -534,7 +588,7 @@ function renderForm() {
 
   form.appendChild(el(`<div class="field"><label>Source (optional)</label><input id="f-source" value="${escapeAttr(f.source || '')}" placeholder="Salt & Straw cookbook, adapted"></div>`));
   form.appendChild(el(`<div class="field"><label>Ingredients</label><textarea id="f-ingredients" placeholder="2 cups heavy cream&#10;1 cup whole milk&#10;3/4 cup sugar">${escapeHTML(f.ingredients || '')}</textarea><div class="field-hint">One per line, however you like to write them.</div></div>`));
-  form.appendChild(el(`<div class="field"><label>Method</label><textarea id="f-instructions" placeholder="Heat cream and milk...">${escapeHTML(f.instructions || '')}</textarea></div>`));
+  form.appendChild(el(`<div class="field"><label>Method</label><textarea id="f-instructions" placeholder="Heat cream and milk...">${escapeHTML(f.instructions || '')}</textarea><div class="field-hint">One step per line. Numbers are added for you, so no need to type them.</div></div>`));
   form.appendChild(el(`<div class="field"><label>My tweaks & adjustments</label><textarea id="f-tweaks" placeholder="Cut sugar to 1/2 cup, added a splash of bourbon...">${escapeHTML(f.tweaks || '')}</textarea></div>`));
   form.appendChild(el(`<div class="field"><label>Tags</label><input id="f-tags" value="${escapeAttr(f.tags || '')}" placeholder="summer, nuts, boozy"><div class="field-hint">Comma separated.</div></div>`));
 
