@@ -22,6 +22,8 @@ let state = {
   pendingPhotos: [],
   isOnline: navigator.onLine,
   pendingSyncCount: 0,
+  // Unsent "Log this batch" text and stars, kept here so a background redraw can't wipe them.
+  batchDraft: { recipeId: null, note: '', rating: 0 },
 };
 
 function el(html) {
@@ -142,8 +144,15 @@ async function boot() {
 
 // Background events (sync ticks, connectivity changes) should never blow
 // away an in-progress add/edit form by re-rendering over it mid-keystroke.
+// Also holds off while a text box has focus (search, batch note), since a
+// redraw would drop the cursor and close the phone keyboard. The latest data is
+// already in memory, so the next redraw shows it.
 function renderIfSafe() {
-  if (state.view !== 'form') render();
+  if (state.view === 'form') return;
+  const a = document.activeElement;
+  const app = document.getElementById('app');
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && app.contains(a)) return;
+  render();
 }
 
 async function refreshPendingCount() {
@@ -157,7 +166,7 @@ function startDataSync() {
   if (unsubscribeRecipes) unsubscribeRecipes();
   unsubscribeRecipes = subscribeToRecipes(session.user.id, (data) => {
     recipes = data;
-    render();
+    renderIfSafe();
   });
 }
 function stopDataSync() {
@@ -399,9 +408,11 @@ function renderDetail() {
     logSec.appendChild(el(`<div style="color:var(--ink-soft);font-size:0.9rem">No batches logged yet. Add one after your next scoop.</div>`));
   }
 
+  if (state.batchDraft.recipeId !== r.id) state.batchDraft = { recipeId: r.id, note: '', rating: 0 };
+  const draft = state.batchDraft;
   const addLog = el(`
     <div class="add-log">
-      <textarea id="batch-note" placeholder="How did this batch turn out? What would you change next time?"></textarea>
+      <textarea id="batch-note" placeholder="How did this batch turn out? What would you change next time?">${escapeHTML(draft.note)}</textarea>
       <div class="add-log-foot">
         <div class="star-picker" id="batch-stars">${[1,2,3,4,5].map(i => `<span data-v="${i}">★</span>`).join('')}</div>
         <button class="mini-btn" id="add-batch-btn">Log this batch</button>
@@ -419,19 +430,26 @@ function renderDetail() {
   }));
 
   const starPicker = wrap.querySelector('#batch-stars');
-  let draftRating = 0;
-  const paintStars = () => starPicker.querySelectorAll('span').forEach(s => s.classList.toggle('on', parseInt(s.dataset.v) <= draftRating));
+  const paintStars = () => starPicker.querySelectorAll('span').forEach(s => s.classList.toggle('on', parseInt(s.dataset.v) <= draft.rating));
   paintStars();
-  starPicker.querySelectorAll('span').forEach(s => s.addEventListener('click', () => { draftRating = parseInt(s.dataset.v); paintStars(); }));
+  starPicker.querySelectorAll('span').forEach(s => s.addEventListener('click', () => { draft.rating = parseInt(s.dataset.v); paintStars(); }));
+  wrap.querySelector('#batch-note').addEventListener('input', (e) => { draft.note = e.target.value; });
 
   wrap.querySelector('#add-batch-btn').addEventListener('click', async () => {
-    const note = wrap.querySelector('#batch-note').value.trim();
-    if (!note && !draftRating) { toast('Add a note or a rating first'); return; }
+    const note = draft.note.trim();
+    const rating = draft.rating;
+    if (!note && !rating) { toast('Add a note or a rating first'); return; }
+    // Clear the draft first: saving redraws the page, and it should come back empty.
+    state.batchDraft = { recipeId: r.id, note: '', rating: 0 };
     try {
-      await addBatchEntry(session.user.id, r.id, { date: new Date().toISOString(), note, rating: draftRating });
+      await addBatchEntry(session.user.id, r.id, { date: new Date().toISOString(), note, rating });
       toast(state.isOnline ? 'Batch logged' : 'Batch logged — will sync once online');
       refreshPendingCount();
-    } catch (e) { console.error(e); toast("Couldn't save that — try again."); }
+    } catch (e) {
+      console.error(e);
+      state.batchDraft = { recipeId: r.id, note, rating };
+      toast("Couldn't save that — try again.");
+    }
   });
 
   return wrap;

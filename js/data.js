@@ -6,6 +6,16 @@ import {
 
 let syncing = false;
 
+// Set by subscribeToRecipes. Re-reads the local cache and hands it to the UI.
+// Every local change calls emitLocal() so the screen updates immediately,
+// online or offline, without waiting for the server to echo the change back.
+let activeEmit = null;
+async function emitLocal() {
+  if (activeEmit) {
+    try { await activeEmit(); } catch (e) { console.warn('Could not refresh the list from local data.', e); }
+  }
+}
+
 function isTempId(id) { return typeof id === 'string' && id.startsWith('local-'); }
 function newTempId() { return 'local-' + crypto.randomUUID(); }
 
@@ -69,40 +79,58 @@ export function subscribeToRecipes(userId, onChange) {
   let stopped = false;
   let channel = null;
 
-  (async () => {
+  async function emit() {
     const local = await getAllRecipesLocal();
     if (!stopped) onChange(sortByUpdated(local.filter((r) => r.owner_id === userId)));
-  })();
+  }
+  activeEmit = emit;
+  emit();
 
   async function refreshFromServer() {
     try {
       const rows = await fetchRecipesServer(userId);
       await replaceServerRecipesLocal(rows);
-      if (!stopped) {
-        const local = await getAllRecipesLocal();
-        onChange(sortByUpdated(local.filter((r) => r.owner_id === userId)));
-      }
+      await emit();
     } catch (e) {
       console.warn('Could not reach the server — showing local data.', e);
     }
   }
 
-  refreshFromServer();
-  syncOutbox(userId).then(refreshFromServer);
-
-  if (navigator.onLine) {
+  // (Re)connects live updates. A phone that slept, or an app opened while
+  // offline, can be left without a working connection, so this is called
+  // again whenever the app comes back into view or back online.
+  // No row filter on purpose: Supabase can't filter DELETE events by owner,
+  // so a filter would hide deletes made on another device. Row Level Security
+  // already limits what events this user receives, and the refresh itself only
+  // fetches this user's rows.
+  function ensureChannel() {
+    if (stopped || !navigator.onLine) return;
+    if (channel && channel.state === 'joined') return;
+    if (channel) supabase.removeChannel(channel);
     channel = supabase
       .channel('recipes-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'recipes', filter: `owner_id=eq.${userId}` }, refreshFromServer)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recipes' }, refreshFromServer)
       .subscribe();
   }
 
-  const onOnline = () => syncOutbox(userId).then(refreshFromServer);
-  window.addEventListener('online', onOnline);
+  refreshFromServer();
+  syncOutbox(userId).then(refreshFromServer);
+  ensureChannel();
+
+  // Catch up with anything that changed while the app was hidden or offline.
+  const catchUp = () => {
+    if (document.visibilityState === 'hidden' || !navigator.onLine) return;
+    ensureChannel();
+    syncOutbox(userId).then(refreshFromServer);
+  };
+  window.addEventListener('online', catchUp);
+  document.addEventListener('visibilitychange', catchUp);
 
   return () => {
     stopped = true;
-    window.removeEventListener('online', onOnline);
+    if (activeEmit === emit) activeEmit = null;
+    window.removeEventListener('online', catchUp);
+    document.removeEventListener('visibilitychange', catchUp);
     if (channel) supabase.removeChannel(channel);
   };
 }
@@ -115,7 +143,21 @@ export async function getPendingSyncCount() {
   return outboxCount();
 }
 
+// Each change below does its work, then refreshes the screen from the local cache.
 export async function saveRecipe(userId, fields, id) {
+  try { return await saveRecipeInner(userId, fields, id); } finally { await emitLocal(); }
+}
+export async function deleteRecipe(userId, id) {
+  try { return await deleteRecipeInner(userId, id); } finally { await emitLocal(); }
+}
+export async function addBatchEntry(userId, recipeId, entry) {
+  try { return await addBatchEntryInner(userId, recipeId, entry); } finally { await emitLocal(); }
+}
+export async function removeBatchEntry(userId, recipeId, entryDate) {
+  try { return await removeBatchEntryInner(userId, recipeId, entryDate); } finally { await emitLocal(); }
+}
+
+async function saveRecipeInner(userId, fields, id) {
   const now = new Date().toISOString();
 
   if (!id) {
@@ -161,7 +203,7 @@ export async function saveRecipe(userId, fields, id) {
   return id;
 }
 
-export async function deleteRecipe(userId, id) {
+async function deleteRecipeInner(userId, id) {
   await deleteRecipeLocal(id);
 
   if (isTempId(id)) {
@@ -184,7 +226,7 @@ export async function deleteRecipe(userId, id) {
   await addOutboxEntry({ type: 'delete', id });
 }
 
-export async function addBatchEntry(userId, recipeId, entry) {
+async function addBatchEntryInner(userId, recipeId, entry) {
   const existing = (await getAllRecipesLocal()).find((r) => r.id === recipeId);
   if (existing) {
     const batches = [...(existing.batches || []), entry];
@@ -202,7 +244,7 @@ export async function addBatchEntry(userId, recipeId, entry) {
   await addOutboxEntry({ type: 'addBatch', id: recipeId, entry });
 }
 
-export async function removeBatchEntry(userId, recipeId, entryDate) {
+async function removeBatchEntryInner(userId, recipeId, entryDate) {
   const existing = (await getAllRecipesLocal()).find((r) => r.id === recipeId);
   if (existing) {
     const batches = (existing.batches || []).filter((b) => b.date !== entryDate);
@@ -294,4 +336,5 @@ export async function syncOutbox(userId) {
   } finally {
     syncing = false;
   }
+  await emitLocal(); // synced rows may have new ids
 }

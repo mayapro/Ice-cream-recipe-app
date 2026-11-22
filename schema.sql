@@ -43,6 +43,15 @@ drop policy if exists "delete own recipes" on public.recipes;
 create policy "delete own recipes" on public.recipes
   for delete using (auth.uid() = owner_id);
 
+-- 2b. Realtime ---------------------------------------------------------
+-- Lets the app hear about changes (including ones made on another device)
+-- without a page refresh. Safe to run more than once.
+do $$
+begin
+  alter publication supabase_realtime add table public.recipes;
+exception when duplicate_object then null;
+end $$;
+
 -- 3. Storage bucket for photos -------------------------------------------
 -- Photos are uploaded under a path like "<user_id>/<random-filename>.jpg".
 -- The bucket is public (so <img src> just works with the returned URL),
